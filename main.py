@@ -1,6 +1,9 @@
 import os
 import re
 import datetime
+import time
+from threading import Thread
+from queue import Queue
 from colorama import Fore, Style, init
 import speech_recognition as sr
 from google.cloud import texttospeech
@@ -19,12 +22,15 @@ VOICE_NAME = "en-US-Polyglot-1"
 PITCH = -5.0
 SYSTEM_INSTRUCTIONS_FILE = 'system.txt'
 OUTPUT_AUDIO_FILE = 'output.wav'
+NOISE_CALIBRATION_TIME = 5
 
 REPLACEMENTS = {
     "Magic": KEY_WORD,
     "madre": KEY_WORD,
     "Madre": KEY_WORD,
     "Madge": KEY_WORD,
+    "nanjai" : KEY_WORD,
+    "Manjai" : KEY_WORD,
 }
 
 # Set up your API keys
@@ -39,6 +45,9 @@ tts_client = texttospeech.TextToSpeechClient.from_service_account_json(GOOGLE_CR
 
 # Initialize colorama
 init(autoreset=True)
+
+# Initialize Speech Queue
+speech_queue = Queue()
 
 # Initialize the recognizer
 recognizer = sr.Recognizer()
@@ -66,7 +75,7 @@ def ask_openai(question):
     conversation_history.append({"role": "user", "content": question})
     try:
         response = client.chat.completions.create(
-            model="gpt-4-1106-preview",
+            model="gpt-3-turbo-1106",
             messages=conversation_history
         )
         assistant_reply = response.choices[0].message.content
@@ -115,21 +124,11 @@ def listen_for_speech_in_background():
     def callback(recognizer, audio):
         try:
             text = recognizer.recognize_google(audio)
-            # Replace words in the REPLACEMENTS dictionary with KEY_WORD
             for word, replacement in REPLACEMENTS.items():
-                # Use \b for word boundary to match whole words and exact case
                 text = re.sub(r'\b' + re.escape(word) + r'\b', replacement, text)
-
-            # Check for the keyword with exact case
             log(f"Recognizer heard: {text}", highlight=KEY_WORD in text)
             if KEY_WORD in text:
-                log(f"Keyword detected!")
-                response = ask_openai(text)
-                log(f"Assistant says: {response}")
-                audio_content = synthesize_speech(response)
-                play_speech(audio_content)
-            else:
-                log("Keyword not detected, waiting for the next command.")
+                speech_queue.put(text)
         except sr.UnknownValueError:
             log("Could not understand audio")
         except sr.RequestError as e:
@@ -137,26 +136,42 @@ def listen_for_speech_in_background():
 
     # Create a microphone source and adjust for ambient noise
     with sr.Microphone() as source:
-        log("Calibrating for Noise (2s)...")
-        recognizer.adjust_for_ambient_noise(source)
+        log(f"Calibrating for Noise ({NOISE_CALIBRATION_TIME}s)...")
+        recognizer.adjust_for_ambient_noise(source, duration=NOISE_CALIBRATION_TIME)
 
     # Now that we've adjusted for ambient noise, start listening in the background
     log("Listening in background...")
     stop_listening = recognizer.listen_in_background(sr.Microphone(), callback)
     return stop_listening
 
-# Main loop
+
+def process_speech_queue():
+    while True:
+        text = speech_queue.get()
+        log(f"Keyword detected!")
+        response = ask_openai(text)
+        log(f"Assistant says: {response}")
+        audio_content = synthesize_speech(response)
+        play_speech(audio_content)
+        speech_queue.task_done()
+
+
 def main():
     stop_listening = listen_for_speech_in_background()
+    worker_thread = Thread(target=process_speech_queue)
+    worker_thread.daemon = True
+    worker_thread.start()
 
     try:
         # Keep the main thread alive
         while True:
-            pass
+            # You can add a small sleep here to reduce CPU usage
+            time.sleep(0.1)
     except KeyboardInterrupt:
         # Stop listening when the user presses Ctrl+C
         stop_listening(wait_for_stop=False)
         log("Stopped listening")
+        worker_thread.join()  # Wait for the worker thread to finish processing
 
 if __name__ == "__main__":
     main()
