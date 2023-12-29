@@ -10,18 +10,9 @@ import argparse
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-# Parse command-line arguments
-parser = argparse.ArgumentParser(description='Virtual Assistant')
-parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
-args = parser.parse_args()
-
-# Global verbosity flag
-verbose = True;
-
 # Custom logging function
 def log(message):
-    if verbose:
-        print(f"\033[90m{message}\033[0m")  # Gray text in terminal
+    print(f"\033[90m{message}\033[0m")  # Gray text in terminal
 
 # Load environment variables from a .env file
 load_dotenv()
@@ -52,7 +43,6 @@ def listen_for_speech():
         audio = recognizer.listen(source)
         try:
             text = recognizer.recognize_google(audio)
-            log(f"Recognized text: {text}")
             return text
         except sr.UnknownValueError:
             log("Could not understand audio")
@@ -72,7 +62,6 @@ def ask_openai(question):
         )
         # Extract the assistant's reply
         assistant_reply = response.choices[0].message.content  # Access the response using attributes
-        log(f"OpenAI response: {assistant_reply}")
         
         # Add the assistant's reply to the conversation history
         conversation_history.append({"role": "assistant", "content": assistant_reply})
@@ -88,10 +77,13 @@ def synthesize_speech(text):
     synthesis_input = texttospeech.SynthesisInput(text=text)
     voice = texttospeech.VoiceSelectionParams(
         language_code="en-US",
-        ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
+        name="en-US-Polyglot-1"
+        #ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
     )
     audio_config = texttospeech.AudioConfig(
-        audio_encoding=texttospeech.AudioEncoding.LINEAR16
+        audio_encoding=texttospeech.AudioEncoding.LINEAR16,
+        pitch=-5.0,
+        speaking_rate=1.15
     )
     try:
         response = tts_client.synthesize_speech(
@@ -117,8 +109,7 @@ def play_speech(audio_content):
         sd.wait()
 
 # Main loop
-wake_word = "hey bubba"
-log("Virtual Assistant is running. Say 'Hey Bubba' to activate.")
+wake_word = "magi"
 while True:
     text = listen_for_speech()
     if text and wake_word in text.lower():
