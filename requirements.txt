@@ -5,3 +5,4 @@ scipy
 SpeechRecognition
 python-dotenv
 pyaudio
+colorama
