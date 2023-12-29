@@ -13,12 +13,19 @@ from openai import OpenAI
 load_dotenv()
 
 # Global options
-KEY_WORD = "magi" # lowercase only
+KEY_WORD = "Magi"
 SPEAKING_RATE = 1.15
 VOICE_NAME = "en-US-Polyglot-1"
 PITCH = -5.0
 SYSTEM_INSTRUCTIONS_FILE = 'system.txt'
 OUTPUT_AUDIO_FILE = 'output.wav'
+
+REPLACEMENTS = {
+    "Magic": KEY_WORD,
+    "madre": KEY_WORD,
+    "Madre": KEY_WORD,
+    "Madge": KEY_WORD,
+}
 
 # Set up your API keys
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
@@ -49,8 +56,9 @@ conversation_history.append({"role": "system", "content": system_content})
 def log(message, highlight=False):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if highlight:
-        # Use regular expressions for case-insensitive replacement
-        message = re.sub(f'(?i){KEY_WORD}', f"{Fore.GREEN}{KEY_WORD.capitalize()}{Style.RESET_ALL}{Fore.LIGHTBLACK_EX}", message)
+        # Use regular expressions with word boundaries for case-insensitive replacement
+        pattern = r'\b' + re.escape(KEY_WORD) + r'\b'
+        message = re.sub(pattern, f"{Fore.GREEN}{KEY_WORD}{Style.RESET_ALL}{Fore.LIGHTBLACK_EX}", message, flags=re.IGNORECASE)
     print(f"{Fore.LIGHTBLACK_EX}[{timestamp}] {message}{Style.RESET_ALL}")
 
 # Function to query OpenAI's GPT using the Conversation API
@@ -107,9 +115,14 @@ def listen_for_speech_in_background():
     def callback(recognizer, audio):
         try:
             text = recognizer.recognize_google(audio)
-            # Use case-insensitive check for the keyword
-            log(f"Recognizer heard: {text}", highlight=re.search(f'(?i){KEY_WORD}', text) is not None)
-            if KEY_WORD in text.lower():
+            # Replace words in the REPLACEMENTS dictionary with KEY_WORD
+            for word, replacement in REPLACEMENTS.items():
+                # Use \b for word boundary to match whole words and exact case
+                text = re.sub(r'\b' + re.escape(word) + r'\b', replacement, text)
+
+            # Check for the keyword with exact case
+            log(f"Recognizer heard: {text}", highlight=KEY_WORD in text)
+            if KEY_WORD in text:
                 log(f"Keyword detected!")
                 response = ask_openai(text)
                 log(f"Assistant says: {response}")
