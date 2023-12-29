@@ -53,23 +53,6 @@ def log(message, highlight=False):
         message = re.sub(f'(?i){KEY_WORD}', f"{Fore.GREEN}{KEY_WORD.capitalize()}{Style.RESET_ALL}{Fore.LIGHTBLACK_EX}", message)
     print(f"{Fore.LIGHTBLACK_EX}[{timestamp}] {message}{Style.RESET_ALL}")
 
-# Function to recognize speech with keyword highlighting
-def listen_for_speech():
-    with sr.Microphone() as source:
-        recognizer.adjust_for_ambient_noise(source)
-        log("Listening...")
-        audio = recognizer.listen(source)
-        try:
-            text = recognizer.recognize_google(audio)
-            # Use case-insensitive check for the keyword
-            log(f"Recognizer heard: {text}", highlight=re.search(f'(?i){KEY_WORD}', text) is not None)
-            return text
-        except sr.UnknownValueError:
-            log("Could not understand audio")
-        except sr.RequestError as e:
-            log(f"Could not request results; {e}")
-    return None
-
 # Function to query OpenAI's GPT using the Conversation API
 def ask_openai(question):
     conversation_history.append({"role": "user", "content": question})
@@ -116,14 +99,16 @@ def play_speech(audio_content):
             out.write(audio_content)
         fs, data = wavfile.read(OUTPUT_AUDIO_FILE)
         log("Playing speech...")
-        sd.play(data, fs)
+        sd.play(data, fs, latency=0.1)
         sd.wait()
 
-# Main loop
-def main():
-    while True:
-        text = listen_for_speech()
-        if text:
+# Function to recognize speech with keyword highlighting using listen_in_background
+def listen_for_speech_in_background():
+    def callback(recognizer, audio):
+        try:
+            text = recognizer.recognize_google(audio)
+            # Use case-insensitive check for the keyword
+            log(f"Recognizer heard: {text}", highlight=re.search(f'(?i){KEY_WORD}', text) is not None)
             if KEY_WORD in text.lower():
                 log(f"Keyword detected!")
                 response = ask_openai(text)
@@ -132,6 +117,33 @@ def main():
                 play_speech(audio_content)
             else:
                 log("Keyword not detected, waiting for the next command.")
+        except sr.UnknownValueError:
+            log("Could not understand audio")
+        except sr.RequestError as e:
+            log(f"Could not request results; {e}")
+
+    # Create a microphone source and adjust for ambient noise
+    with sr.Microphone() as source:
+        log("Calibrating for Noise (2s)...")
+        recognizer.adjust_for_ambient_noise(source)
+
+    # Now that we've adjusted for ambient noise, start listening in the background
+    log("Listening in background...")
+    stop_listening = recognizer.listen_in_background(sr.Microphone(), callback)
+    return stop_listening
+
+# Main loop
+def main():
+    stop_listening = listen_for_speech_in_background()
+
+    try:
+        # Keep the main thread alive
+        while True:
+            pass
+    except KeyboardInterrupt:
+        # Stop listening when the user presses Ctrl+C
+        stop_listening(wait_for_stop=False)
+        log("Stopped listening")
 
 if __name__ == "__main__":
     main()
