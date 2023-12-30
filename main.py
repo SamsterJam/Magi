@@ -1,3 +1,5 @@
+# === Imports === #
+
 import os
 import re
 import datetime
@@ -14,26 +16,55 @@ from openai import OpenAI
 import pvporcupine
 from scipy.io import wavfile
 
-# Load environment variables from a .env file
-load_dotenv()
 
-# Global options
-KEY_WORD = "Hey Magi"  # Replace with the actual keyword you have a model for
+
+
+
+# === Global Options === #
+
+KEY_WORD = "Hey Magi"
+CUSTOM_WAKE_WORD_FILE = "Magi-wake.ppn"
 SPEAKING_RATE = 1.15
 VOICE_NAME = "en-US-Polyglot-1"
 PITCH = -5.0
 OUTPUT_AUDIO_FILE = 'output.wav'
 NOISE_CALIBRATION_TIME = 5
 COMMAND_AWAIT_TIME_OUT = 10
-
 RECORDINGS_DIR = 'recordings'
-if not os.path.exists(RECORDINGS_DIR):
-    os.makedirs(RECORDINGS_DIR)
+
+
+
+
+
+# === API keys ===#
+
+# Load environment variables from a .env file
+load_dotenv()
 
 # Set up your API keys
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 GOOGLE_CREDENTIALS = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
 PORCUPINE_ACCESS_KEY = os.getenv('PORCUPINE_ACCESS_KEY')
+
+
+
+
+
+# === Initializations === #
+
+def log(message, highlight=False):
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if highlight:
+        # Use regular expressions with word boundaries for case-insensitive replacement
+        pattern = r'\b' + re.escape(KEY_WORD) + r'\b'
+        message = re.sub(pattern, f"{Fore.GREEN}{KEY_WORD}{Style.RESET_ALL}{Fore.LIGHTBLACK_EX}", message, flags=re.IGNORECASE)
+    print(f"{Fore.LIGHTBLACK_EX}[{timestamp}] {message}{Style.RESET_ALL}")
+
+log("Initializing...")
+
+# Initialize Recordings Folder
+if not os.path.exists(RECORDINGS_DIR):
+    os.makedirs(RECORDINGS_DIR)
 
 # Initialize OpenAI client
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
@@ -56,25 +87,24 @@ conversation_history = []
 # Initialize Noise Threshold
 ambient_noise_energy_threshold = None
 
+# Global flag to indicate shutdown
+shutdown_flag = False
 
-# Custom logging function with timestamps and keyword highlighting
-def log(message, highlight=False):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    if highlight:
-        # Use regular expressions with word boundaries for case-insensitive replacement
-        pattern = r'\b' + re.escape(KEY_WORD) + r'\b'
-        message = re.sub(pattern, f"{Fore.GREEN}{KEY_WORD}{Style.RESET_ALL}{Fore.LIGHTBLACK_EX}", message, flags=re.IGNORECASE)
-    print(f"{Fore.LIGHTBLACK_EX}[{timestamp}] {message}{Style.RESET_ALL}")
+log("Initialization Complete!")
 
 
-def play_acknowledgment_sound(ack_sound_file):
+
+
+# === Function Definitions === #
+
+def play_feedback_sound(sound_file):
     try:
         # Read the audio file
-        fs, data = wavfile.read(ack_sound_file)
+        fs, data = wavfile.read(sound_file)
         # Play the audio file
         sd.play(data, fs)
     except Exception as e:
-        log(f"Error playing acknowledgment sound: {e}")
+        log(f"Error playing feedback sound: {e}")
 
 
 def calibrate_for_ambient_noise():
@@ -86,11 +116,9 @@ def calibrate_for_ambient_noise():
         log(f"Calibrated energy threshold: {ambient_noise_energy_threshold}")
 
 
-
-
 # Initialize Porcupine wake word engine
 porcupine = None
-keyword_path = os.path.join(os.path.dirname(__file__), "Magi-wake.ppn")
+keyword_path = os.path.join(os.path.dirname(__file__), CUSTOM_WAKE_WORD_FILE)
 
 def listen_for_wake_word():
     global porcupine
@@ -106,7 +134,7 @@ def listen_for_wake_word():
         if keyword_index >= 0:
             log(f"Keyword '{KEY_WORD}' detected, listening for command...")
             # Play the acknowledgment sound
-            play_acknowledgment_sound('acknowledgment.wav')
+            play_feedback_sound('acknowledgment.wav')
             speech_queue.put(True)  # Signal that the wake word was detected
 
     with sd.InputStream(callback=callback,
@@ -146,6 +174,12 @@ def recognize_speech():
 
 
 def process_command(command):
+    # Check if the command is a special keyword that should trigger a function
+    if command.lower() in command_actions:
+        command_actions[command.lower()]()
+        return None  # Return None to indicate that no further processing is needed
+
+    # If the command is not a special keyword, continue with processing
     conversation_history.append({"role": "user", "content": command})
     try:
         response = openai_client.chat.completions.create(
@@ -196,27 +230,71 @@ def play_speech(audio_content):
         sd.wait()
 
 
+
+
+# === Command Actions === #
+
+def stop_audio():
+    sd.stop()
+    log("Audio stopped.")
+
+def cancel_command():
+    log("Command cancelled.")
+
+def force_shutdown_now():
+    global shutdown_flag
+    log("Force shutdown initiated.")
+    shutdown_flag = True
+
+
+# Define a dictionary that maps specific commands to functions
+command_actions = {
+    "stop": stop_audio,
+    "nevermind": cancel_command,
+    "never mind": cancel_command,
+    "shutdown": force_shutdown_now,
+    "shut down": force_shutdown_now,
+}
+
+
+
+
+
+
+# === Main Function === #
+
 def main():
+    log("Main program starting...")
     wake_word_thread = Thread(target=listen_for_wake_word)
     wake_word_thread.daemon = True
     wake_word_thread.start()
 
     try:
-        while True:
+        log("Entering Main-Loop...\n")
+        while not shutdown_flag:
             # Wait for the wake word to be detected
             speech_queue.get()
             command = recognize_speech()
             if command:
-                play_acknowledgment_sound('acknowledgment.wav')
+                play_feedback_sound('acknowledgment.wav')
                 response = process_command(command)
-                audio_content = synthesize_speech(response)
-                play_speech(audio_content)
+                if response:  # Only synthesize and play speech if there's a response
+                    audio_content = synthesize_speech(response)
+                    play_speech(audio_content)
             speech_queue.task_done()
+            
+        log("Exiting Main-Loop...\n")
     except KeyboardInterrupt:
         log("Exiting program...")
     finally:
         if porcupine is not None:
             porcupine.delete()
+
+
+
+
+
+# === Start Script === #
 
 if __name__ == "__main__":
     calibrate_for_ambient_noise()

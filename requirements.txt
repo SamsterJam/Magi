@@ -6,3 +6,4 @@ SpeechRecognition
 python-dotenv
 pyaudio
 colorama
+pvporcupine
