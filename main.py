@@ -33,7 +33,7 @@ COMMAND_AWAIT_TIME_OUT = 10
 RECORDINGS_DIR = 'recordings'
 
 RECOGNIZER_PAUSE_THRESHOLD = 0.5
-RECOGNIZER_PHRASE_THRESHOLD = 0.1
+RECOGNIZER_PHRASE_THRESHOLD = 0.3
 RECOGNIZER_NON_SPEAKING_DURATION = 0.2
 
 
@@ -53,14 +53,11 @@ PORCUPINE_ACCESS_KEY = os.getenv('PORCUPINE_ACCESS_KEY')
 
 # === Initializations === #
 
-def log(message, highlight=False):
+def log(message, error=False):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    if highlight:
-        # Use regular expressions with word boundaries for case-insensitive replacement
-        pattern = r'\b' + re.escape(KEY_WORD) + r'\b'
-        message = re.sub(pattern, f"{Fore.GREEN}{KEY_WORD}{Style.RESET_ALL}{Fore.LIGHTBLACK_EX}", message, flags=re.IGNORECASE)
-    print(f"{Fore.LIGHTBLACK_EX}[{timestamp}] {message}{Style.RESET_ALL}")
-
+    color = Fore.RED if error else Fore.LIGHTBLACK_EX
+    print(f"{color}[{timestamp}] {message}{Style.RESET_ALL}")
+    
 log("Initializing...")
 
 # Initialize Recordings Folder
@@ -88,6 +85,11 @@ recognizer.non_speaking_duration = RECOGNIZER_NON_SPEAKING_DURATION
 # Initialize Conversation History
 conversation_history = []
 
+with open("requirements.txt", "r") as file:
+    data = file.read()
+
+conversation_history.append({"role": "system", "content": data})
+
 # Initialize Noise Threshold
 ambient_noise_energy_threshold = None
 
@@ -110,7 +112,7 @@ def play_feedback_sound(sound_file, waitFullSound=False):
         if waitFullSound:
             sd.wait()
     except Exception as e:
-        log(f"Error playing feedback sound: {e}")
+        log(f"Error playing feedback sound: {e}", True)
 
 
 def calibrate_for_ambient_noise():
@@ -132,7 +134,7 @@ def listen_for_wake_word():
 
     def callback(indata, frames, time, status):
         if status:
-            log(f"Error: {status}")
+            log(f"Error: {status}", True)
         # Convert the input data to 16-bit integers
         if indata.dtype != np.int16:
             indata = (indata * 32767).astype(np.int16)
@@ -140,7 +142,7 @@ def listen_for_wake_word():
         if keyword_index >= 0:
             log(f"Keyword '{KEY_WORD}' detected, listening for command...")
             # Play the acknowledgment sound
-            play_feedback_sound('acknowledgment.wav')
+            play_feedback_sound('Sounds/Wake.wav')
             speech_queue.put(True)  # Signal that the wake word was detected
 
     with sd.InputStream(callback=callback,
@@ -171,11 +173,14 @@ def recognize_speech():
             
             return text
         except sr.WaitTimeoutError:
-            log("No speech was detected within the timeout period.")
+            log("No speech was detected within the timeout period.", True)
+            play_feedback_sound("Sounds/NoSpeech.wav")
         except sr.UnknownValueError:
-            log("Google Speech Recognition could not understand audio")
+            log("Google Speech Recognition could not understand audio", True)
+            play_feedback_sound("Sounds/NoSpeech.wav")
         except sr.RequestError as e:
-            log(f"Could not request results from Google Speech Recognition service; {e}")
+            log(f"Could not request results from Google Speech Recognition service; {e}", True)
+            play_feedback_sound("Sounds/Error.wav")
     return None
 
 
@@ -197,7 +202,8 @@ def process_command(command):
         log("Assistant Response: " + assistant_reply)
         return assistant_reply
     except Exception as e:
-        log(f"Error querying OpenAI: {e}")
+        log(f"Error querying OpenAI: {e}", True)
+        play_feedback_sound("Sounds/Error.wav")
     return "I'm sorry, I can't process your request right now."
 
 
@@ -221,7 +227,7 @@ def synthesize_speech(text):
         log("Speech synthesized successfully")
         return response.audio_content
     except Exception as e:
-        log(f"Error synthesizing speech: {e}")
+        log(f"Error synthesizing speech: {e}", True)
     return None
 
 
@@ -242,16 +248,17 @@ def play_speech(audio_content):
 
 def stop_audio():
     sd.stop()
+    play_feedback_sound('Sounds/Cancel.wav')
     log("Audio stopped.")
 
 def cancel_command():
     log("Command cancelled.")
-    play_feedback_sound('acknowledgment.wav')
+    play_feedback_sound('Sounds/Cancel.wav')
 
 def shutdown():
     global shutdown_flag
     log("Force shutdown initiated.")
-    play_feedback_sound('acknowledgment.wav', True)
+    play_feedback_sound('Sounds/Shutdown.wav', True)
     shutdown_flag = True
 
 
@@ -285,7 +292,7 @@ def main():
             speech_queue.get()
             command = recognize_speech()
             if command:
-                play_feedback_sound('acknowledgment.wav')
+                play_feedback_sound('Sounds/Heard.wav')
                 response = process_command(command)
                 if response:  # Only synthesize and play speech if there's a response
                     audio_content = synthesize_speech(response)
@@ -298,8 +305,6 @@ def main():
     finally:
         if porcupine is not None:
             porcupine.delete()
-
-time.sleep(1) ## Let things end
 
 
 
