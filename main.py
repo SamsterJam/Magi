@@ -32,6 +32,9 @@ NOISE_CALIBRATION_TIME = 5
 COMMAND_AWAIT_TIME_OUT = 10
 RECORDINGS_DIR = 'recordings'
 
+RECOGNIZER_PAUSE_THRESHOLD = 0.5
+RECOGNIZER_PHRASE_THRESHOLD = 0.1
+RECOGNIZER_NON_SPEAKING_DURATION = 0.2
 
 
 
@@ -45,8 +48,6 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 GOOGLE_CREDENTIALS = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
 PORCUPINE_ACCESS_KEY = os.getenv('PORCUPINE_ACCESS_KEY')
-
-
 
 
 
@@ -80,6 +81,9 @@ speech_queue = Queue()
 
 # Initialize the recognizer
 recognizer = sr.Recognizer()
+recognizer.pause_threshold = RECOGNIZER_PAUSE_THRESHOLD
+recognizer.phrase_threshold = RECOGNIZER_PHRASE_THRESHOLD
+recognizer.non_speaking_duration = RECOGNIZER_NON_SPEAKING_DURATION
 
 # Initialize Conversation History
 conversation_history = []
@@ -97,12 +101,14 @@ log("Initialization Complete!")
 
 # === Function Definitions === #
 
-def play_feedback_sound(sound_file):
+def play_feedback_sound(sound_file, waitFullSound=False):
     try:
         # Read the audio file
         fs, data = wavfile.read(sound_file)
         # Play the audio file
         sd.play(data, fs)
+        if waitFullSound:
+            sd.wait()
     except Exception as e:
         log(f"Error playing feedback sound: {e}")
 
@@ -240,10 +246,12 @@ def stop_audio():
 
 def cancel_command():
     log("Command cancelled.")
+    play_feedback_sound('acknowledgment.wav')
 
-def force_shutdown_now():
+def shutdown():
     global shutdown_flag
     log("Force shutdown initiated.")
+    play_feedback_sound('acknowledgment.wav', True)
     shutdown_flag = True
 
 
@@ -252,8 +260,9 @@ command_actions = {
     "stop": stop_audio,
     "nevermind": cancel_command,
     "never mind": cancel_command,
-    "shutdown": force_shutdown_now,
-    "shut down": force_shutdown_now,
+    "cancel": cancel_command,
+    "shutdown": shutdown,
+    "shut down": shutdown,
 }
 
 
@@ -289,6 +298,8 @@ def main():
     finally:
         if porcupine is not None:
             porcupine.delete()
+
+time.sleep(1) ## Let things end
 
 
 
