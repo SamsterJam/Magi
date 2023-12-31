@@ -323,22 +323,30 @@ def create_thread():
         thread_response = openai_client.beta.threads.create()
         thread_id = thread_response.id
         vlog(f"Thread created with ID: {thread_id}")
-        with open(f"Threads/{thread_id}.txt", "w") as file:
-            file.write(thread_id)
+        # Append the new thread ID to the active.treg file
+        with open("active.treg", "a") as file:
+            file.write(thread_id + "\n")
         return thread_id
     except Exception as e:
         log(f"Failed to create thread: {e}", True)
-        traceback.print_exc()  # This will print the stack trace to the log
+        traceback.print_exc()
 
 def delete_thread(thread_id):
     vlog(f"Deleting thread with ID: {thread_id}...")
     try:
         openai_client.beta.threads.delete(thread_id)
-        os.remove(f"Threads/{thread_id}.txt")
         log(f"Thread with ID: {thread_id} deleted successfully.")
+        # Remove the deleted thread ID from the active.treg file
+        with open("active.treg", "r") as file:
+            thread_ids = file.read().splitlines()
+        if thread_id in thread_ids:
+            thread_ids.remove(thread_id)
+        with open("active.treg", "w") as file:
+            file.write("\n".join(thread_ids) + "\n")
     except Exception as e:
         log(f"Failed to delete thread: {e}", True)
         traceback.print_exc()
+
 
 def signal_handler(sig, frame):
     global shutdown_flag, wake_word_thread
@@ -348,6 +356,23 @@ def signal_handler(sig, frame):
         porcupine.delete()  # Stop Porcupine if it's running
     if wake_word_thread and wake_word_thread.is_alive():
         wake_word_thread.join()  # Ensure the wake word thread is joined
+
+def closePastConversationThreads():
+    vlog("Checking for unclosed conversation threads...")
+    thread_ids = []
+    try:
+        with open("active.treg", "r") as file:
+            thread_ids = file.read().splitlines()
+    except FileNotFoundError:
+        # If the file does not exist, create it
+        with open("active.treg", "w") as file:
+            pass
+
+    if thread_ids:
+        for thread_id in thread_ids:
+            if thread_id:  # Ensure the thread ID is not empty
+                delete_thread(thread_id)
+
 
 
 
@@ -387,12 +412,14 @@ command_actions = {
 # === Main Function === #
 
 def main():
+
     # Check if shutdown has been initiated before entering the main loop
     if shutdown_flag:
         log("Shutdown was initiated during startup. Skipping main loop.")
         return  # Exit the main function early
 
     vlog("Main program starting...")
+
     global wake_word_thread
 
     # Create a new thread for the conversation
@@ -438,9 +465,9 @@ if __name__ == "__main__":
         # Register the signal handler for SIGINT
         signal.signal(signal.SIGINT, signal_handler)
 
-        # Ensure the Threads directory exists
-        if not os.path.exists('Threads'):
-            os.makedirs('Threads')
+        
+        closePastConversationThreads()
+
         calibrate_for_ambient_noise()
         main()
     except Exception as e:
