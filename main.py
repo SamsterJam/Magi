@@ -3,6 +3,7 @@
 import os
 import re
 import datetime
+import signal
 import traceback
 import time
 import argparse
@@ -31,7 +32,7 @@ SPEAKING_RATE = 1.15
 VOICE_NAME = "en-US-Polyglot-1"
 PITCH = -5.0
 OUTPUT_AUDIO_FILE = 'output.wav'
-NOISE_CALIBRATION_TIME = 5
+NOISE_CALIBRATION_TIME = 3
 COMMAND_AWAIT_TIME_OUT = 10
 RECORDINGS_DIR = 'recordings'
 
@@ -114,6 +115,7 @@ conversation_history.append({"role": "system", "content": data})
 ambient_noise_energy_threshold = None
 
 # Global flag to indicate shutdown
+wake_word_thread = None
 shutdown_flag = False
 
 vlog("Initialization Complete!")
@@ -128,7 +130,7 @@ def play_feedback_sound(sound_file, waitFullSound=False):
         # Read the audio file
         fs, data = wavfile.read(sound_file)
         # Play the audio file
-        sd.play(data, fs)
+        sd.play(data, fs, latency=0.1)
         if waitFullSound:
             sd.wait()
     except Exception as e:
@@ -139,9 +141,14 @@ def calibrate_for_ambient_noise():
     global ambient_noise_energy_threshold
     with sr.Microphone() as source:
         log(f"Calibrating for ambient noise ({NOISE_CALIBRATION_TIME}s)... ")
-        recognizer.adjust_for_ambient_noise(source, duration=NOISE_CALIBRATION_TIME)
-        ambient_noise_energy_threshold = recognizer.energy_threshold
-        vlog(f"Calibrated energy threshold: {ambient_noise_energy_threshold}")
+        start_time = time.time()
+        while time.time() - start_time < NOISE_CALIBRATION_TIME:
+            if shutdown_flag:
+                log("Calibration interrupted by shutdown.")
+                return
+            recognizer.adjust_for_ambient_noise(source, duration=1)
+            ambient_noise_energy_threshold = recognizer.energy_threshold
+            vlog(f"Calibrated energy threshold: {ambient_noise_energy_threshold}")
 
 
 # Initialize Porcupine wake word engine
@@ -170,7 +177,7 @@ def listen_for_wake_word():
                         samplerate=porcupine.sample_rate,
                         channels=1):
         log(f"Listening for keyword '{KEY_WORD}'...")
-        while True:
+        while not shutdown_flag:  # Check the shutdown_flag
             time.sleep(0.1)
 
 
@@ -264,7 +271,7 @@ def process_command_with_assistant(thread_id, command):
         else:
             assistant_reply = "I'm sorry, I can't process your request right now."
 
-        vlog(f"OpenAI: Returning Response: {assistant_reply}")
+        log(f"Assistant Response: {assistant_reply}")
         return assistant_reply
     except Exception as e:
         log(f"Error during command processing: {e}", True)
@@ -333,7 +340,14 @@ def delete_thread(thread_id):
         log(f"Failed to delete thread: {e}", True)
         traceback.print_exc()
 
-
+def signal_handler(sig, frame):
+    global shutdown_flag, wake_word_thread
+    log("Shutdown initiated by signal...")
+    shutdown_flag = True
+    if porcupine is not None:
+        porcupine.delete()  # Stop Porcupine if it's running
+    if wake_word_thread and wake_word_thread.is_alive():
+        wake_word_thread.join()  # Ensure the wake word thread is joined
 
 
 
@@ -350,7 +364,7 @@ def cancel_command():
 
 def shutdown():
     global shutdown_flag
-    log("Force shutdown initiated.")
+    log("Shutdown initiated...")
     play_feedback_sound('Sounds/Shutdown.wav', True)
     shutdown_flag = True
 
@@ -373,7 +387,14 @@ command_actions = {
 # === Main Function === #
 
 def main():
-    log("Main program starting...")
+    # Check if shutdown has been initiated before entering the main loop
+    if shutdown_flag:
+        log("Shutdown was initiated during startup. Skipping main loop.")
+        return  # Exit the main function early
+
+    vlog("Main program starting...")
+    global wake_word_thread
+
     # Create a new thread for the conversation
     thread_id = create_thread()
     wake_word_thread = Thread(target=listen_for_wake_word)
@@ -387,16 +408,21 @@ def main():
             speech_queue.get()
             command = recognize_speech()  # This line defines the 'command' variable
             if command:
-                play_feedback_sound('Sounds/Heard.wav')
-                response = process_command_with_assistant(thread_id, command)
-                if response:  # Only synthesize and play speech if there's a response
-                    audio_content = synthesize_speech(response)
-                    play_speech(audio_content)
+                # Check if the command is a custom command
+                if command.lower() in command_actions:
+                    command_actions[command.lower()]()  # Execute the corresponding function
+                else:
+                    play_feedback_sound('Sounds/Heard.wav')
+                    response = process_command_with_assistant(thread_id, command)
+                    if response:  # Only synthesize and play speech if there's a response
+                        audio_content = synthesize_speech(response)
+                        play_speech(audio_content)
             speech_queue.task_done()
         log("Exiting Main-Loop...\n")
     except KeyboardInterrupt:
         log("Exiting program...")
     finally:
+        wake_word_thread.join()
         if porcupine is not None:
             porcupine.delete()
         delete_thread(thread_id)  # Ensure the thread is deleted
@@ -409,6 +435,9 @@ def main():
 
 if __name__ == "__main__":
     try:
+        # Register the signal handler for SIGINT
+        signal.signal(signal.SIGINT, signal_handler)
+
         # Ensure the Threads directory exists
         if not os.path.exists('Threads'):
             os.makedirs('Threads')
