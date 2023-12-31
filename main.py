@@ -3,7 +3,9 @@
 import os
 import re
 import datetime
+import traceback
 import time
+import argparse
 import numpy as np
 import sounddevice as sd
 from queue import Queue
@@ -23,6 +25,7 @@ from scipy.io import wavfile
 # === Global Options === #
 
 KEY_WORD = "Hey Magi"
+ASSISTANT_ID = "asst_9MSfQ82sD2yiU0iz5pPbcIEA"
 CUSTOM_WAKE_WORD_FILE = "Magi-wake.ppn"
 SPEAKING_RATE = 1.15
 VOICE_NAME = "en-US-Polyglot-1"
@@ -51,14 +54,31 @@ PORCUPINE_ACCESS_KEY = os.getenv('PORCUPINE_ACCESS_KEY')
 
 
 
+
+
+# === Command-line argument parsing === #
+
+parser = argparse.ArgumentParser(description="Log messages with optional verbosity.")
+parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose logging')
+args = parser.parse_args()
+
+
+
+
+
 # === Initializations === #
 
 def log(message, error=False):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    color = Fore.RED if error else Fore.LIGHTBLACK_EX
+    color = Fore.RED if error else Fore.RESET
     print(f"{color}[{timestamp}] {message}{Style.RESET_ALL}")
+
+def vlog(message):
+    if args.verbose:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"{Fore.LIGHTBLACK_EX}[{timestamp}] {message}{Style.RESET_ALL}")
     
-log("Initializing...")
+vlog("Initializing...")
 
 # Initialize Recordings Folder
 if not os.path.exists(RECORDINGS_DIR):
@@ -96,7 +116,7 @@ ambient_noise_energy_threshold = None
 # Global flag to indicate shutdown
 shutdown_flag = False
 
-log("Initialization Complete!")
+vlog("Initialization Complete!")
 
 
 
@@ -121,7 +141,7 @@ def calibrate_for_ambient_noise():
         log(f"Calibrating for ambient noise ({NOISE_CALIBRATION_TIME}s)... ")
         recognizer.adjust_for_ambient_noise(source, duration=NOISE_CALIBRATION_TIME)
         ambient_noise_energy_threshold = recognizer.energy_threshold
-        log(f"Calibrated energy threshold: {ambient_noise_energy_threshold}")
+        vlog(f"Calibrated energy threshold: {ambient_noise_energy_threshold}")
 
 
 # Initialize Porcupine wake word engine
@@ -169,7 +189,7 @@ def recognize_speech():
             audio_filename = os.path.join(RECORDINGS_DIR, f"audio_{timestamp}.wav")
             with open(audio_filename, "wb") as audio_file:
                 audio_file.write(audio.get_wav_data())
-            log(f"Audio saved to {audio_filename}")
+            vlog(f"Audio saved to {audio_filename}")
             
             return text
         except sr.WaitTimeoutError:
@@ -184,30 +204,75 @@ def recognize_speech():
     return None
 
 
-def process_command(command):
-    # Check if the command is a special keyword that should trigger a function
-    if command.lower() in command_actions:
-        command_actions[command.lower()]()
-        return None  # Return None to indicate that no further processing is needed
-
-    # If the command is not a special keyword, continue with processing
-    conversation_history.append({"role": "user", "content": command})
+def process_command_with_assistant(thread_id, command):
     try:
-        response = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo-1106",
-            messages=conversation_history
+        # Log the command received
+        vlog(f"OpenAI: Received command: {command}")
+
+        # Add the user's message to the thread
+        vlog("OpenAI: Creating Message...")
+        message = openai_client.beta.threads.messages.create(
+            thread_id=thread_id,
+            role="user",
+            content=command
         )
-        assistant_reply = response.choices[0].message.content
-        conversation_history.append({"role": "assistant", "content": assistant_reply})
-        log("Assistant Response: " + assistant_reply)
+
+        # Log the message ID
+        vlog(f"Message created with ID: {message.id}")
+
+        # Run the assistant on the thread
+        vlog("OpenAI: Running Assistant with Thread...")
+        run_response = openai_client.beta.threads.runs.create(
+            thread_id=thread_id,
+            assistant_id=ASSISTANT_ID  # Replace with your actual assistant ID
+        )
+
+        # Log the run ID
+        vlog(f"Run created with ID: {run_response.id}")
+
+        # Wait for the run to complete and get the assistant's response
+        vlog("OpenAI: Waiting for Response Creation...")
+        while True:
+            run_status = openai_client.beta.threads.runs.retrieve(
+                thread_id=thread_id,
+                run_id=run_response.id
+            )
+            if run_status.status == 'completed':
+                vlog("OpenAI: Created Response!")
+                break
+            time.sleep(1)  # Polling interval
+
+        # Retrieve the assistant's messages
+        vlog("OpenAI: Retrieving Response...")
+        messages = openai_client.beta.threads.messages.list(
+            thread_id=thread_id
+        )
+        vlog("OpenAI: Retrieved Response!")
+
+        # Extract the text content from the assistant's last message
+        assistant_messages = [msg for msg in messages.data if msg.role == 'assistant']
+        # Sort the messages by the 'created_at' timestamp
+        assistant_messages.sort(key=lambda msg: msg.created_at)
+        if assistant_messages:
+            # Get the last message from the assistant
+            vlog(assistant_messages)
+            assistant_reply_content = assistant_messages[-1].content
+            if isinstance(assistant_reply_content, list) and assistant_reply_content:
+                assistant_reply = assistant_reply_content[-1].text.value  # Get the last text value
+            else:
+                assistant_reply = "I'm sorry, I can't process your request right now."
+        else:
+            assistant_reply = "I'm sorry, I can't process your request right now."
+
+        vlog(f"OpenAI: Returning Response: {assistant_reply}")
         return assistant_reply
     except Exception as e:
-        log(f"Error querying OpenAI: {e}", True)
-        play_feedback_sound("Sounds/Error.wav")
-    return "I'm sorry, I can't process your request right now."
+        log(f"Error during command processing: {e}", True)
+        traceback.print_exc()
 
 
 def synthesize_speech(text):
+    vlog(f"Google-Synthesis: Initializing with text: '{text}'")
     synthesis_input = texttospeech.SynthesisInput(text=text)
     voice = texttospeech.VoiceSelectionParams(
         language_code="en-US",
@@ -218,13 +283,16 @@ def synthesize_speech(text):
         pitch=PITCH,
         speaking_rate=SPEAKING_RATE
     )
+    vlog("Google-Synthesis: Initialized!")
     try:
+        vlog("Google-Synthesis: Creating Response...")
         response = tts_client.synthesize_speech(
             input=synthesis_input,
             voice=voice,
             audio_config=audio_config
         )
         log("Speech synthesized successfully")
+        vlog("Google-Synthesis: Returning Response...")
         return response.audio_content
     except Exception as e:
         log(f"Error synthesizing speech: {e}", True)
@@ -240,6 +308,31 @@ def play_speech(audio_content):
         log("Playing speech...")
         sd.play(data, fs)
         sd.wait()
+
+
+def create_thread():
+    vlog("Creating a new thread...")
+    try:
+        thread_response = openai_client.beta.threads.create()
+        thread_id = thread_response.id
+        vlog(f"Thread created with ID: {thread_id}")
+        with open(f"Threads/{thread_id}.txt", "w") as file:
+            file.write(thread_id)
+        return thread_id
+    except Exception as e:
+        log(f"Failed to create thread: {e}", True)
+        traceback.print_exc()  # This will print the stack trace to the log
+
+def delete_thread(thread_id):
+    vlog(f"Deleting thread with ID: {thread_id}...")
+    try:
+        openai_client.beta.threads.delete(thread_id)
+        os.remove(f"Threads/{thread_id}.txt")
+        log(f"Thread with ID: {thread_id} deleted successfully.")
+    except Exception as e:
+        log(f"Failed to delete thread: {e}", True)
+        traceback.print_exc()
+
 
 
 
@@ -281,6 +374,8 @@ command_actions = {
 
 def main():
     log("Main program starting...")
+    # Create a new thread for the conversation
+    thread_id = create_thread()
     wake_word_thread = Thread(target=listen_for_wake_word)
     wake_word_thread.daemon = True
     wake_word_thread.start()
@@ -290,21 +385,21 @@ def main():
         while not shutdown_flag:
             # Wait for the wake word to be detected
             speech_queue.get()
-            command = recognize_speech()
+            command = recognize_speech()  # This line defines the 'command' variable
             if command:
                 play_feedback_sound('Sounds/Heard.wav')
-                response = process_command(command)
+                response = process_command_with_assistant(thread_id, command)
                 if response:  # Only synthesize and play speech if there's a response
                     audio_content = synthesize_speech(response)
                     play_speech(audio_content)
             speech_queue.task_done()
-            
         log("Exiting Main-Loop...\n")
     except KeyboardInterrupt:
         log("Exiting program...")
     finally:
         if porcupine is not None:
             porcupine.delete()
+        delete_thread(thread_id)  # Ensure the thread is deleted
 
 
 
@@ -313,5 +408,12 @@ def main():
 # === Start Script === #
 
 if __name__ == "__main__":
-    calibrate_for_ambient_noise()
-    main()
+    try:
+        # Ensure the Threads directory exists
+        if not os.path.exists('Threads'):
+            os.makedirs('Threads')
+        calibrate_for_ambient_noise()
+        main()
+    except Exception as e:
+        log(f"Unhandled exception in main: {e}", True)
+        traceback.print_exc()
