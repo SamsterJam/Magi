@@ -1,3 +1,4 @@
+import time
 import pvporcupine
 import numpy as np
 import sounddevice as sd
@@ -38,7 +39,8 @@ class WakeWordDetector:
                             samplerate=self.porcupine.sample_rate,
                             channels=1):
             log(f"Listening for keyword '{self.config.key_word}'...")
-            sd.sleep(-1)  # Keep the stream open
+            while True:  # Use the shutdown_flag from the config
+                time.sleep(0.1)
 
     def shutdown(self):
         if self.porcupine is not None:

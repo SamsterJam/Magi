@@ -4,6 +4,7 @@ from queue import Queue
 import threading
 from utils import log, vlog, vvlog
 
+
 class AudioManager:
     def __init__(self):
         self.playback_queue = Queue()

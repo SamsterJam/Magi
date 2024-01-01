@@ -15,7 +15,7 @@ class OpenAIClient:
         try:
             thread_response = self.openai_client.beta.threads.create()
             thread_id = thread_response.id
-            vlog(f"Thread created with ID: {thread_id}", self.verbose)
+            vlog(f"Thread created with ID: {thread_id}")
             self._record_active_thread(thread_id)
             return thread_id
         except Exception as e:
@@ -38,7 +38,7 @@ class OpenAIClient:
                 model="gpt-3.5-turbo-1106"  # Replace with the desired model
             )
             assistant_id = assistant_response.id
-            vlog(f"Assistant created with ID: {assistant_id}", self.verbose)
+            vlog(f"Assistant created with ID: {assistant_id}")
             self._record_active_assistant(assistant_id)
             return assistant_id
         except Exception as e:
@@ -60,14 +60,14 @@ class OpenAIClient:
                 role="user",
                 content=command
             )
-            vlog(f"Message created with ID: {message.id}", self.verbose)
+            vlog(f"Message created with ID: {message.id}")
 
             # Run the assistant on the thread
             run_response = self.openai_client.beta.threads.runs.create(
                 thread_id=thread_id,
                 assistant_id=assistant_id
             )
-            vlog(f"Run created with ID: {run_response.id}", self.verbose)
+            vlog(f"Run created with ID: {run_response.id}")
 
             # Wait for the run to complete and get the assistant's response
             while True:

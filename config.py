@@ -33,9 +33,10 @@ class Config:
         self.custom_wake_word_file = "Magi-wake.ppn"
 
         # Directories
-        self.recordings_dir = 'recordings'
+        self.recordings_directory = 'recordings'
+        self.outputs_directory = 'outputs'
         self.system_prompt_file = "system.txt"
 
         # Ensure necessary directories exist
-        if not os.path.exists(self.recordings_dir):
-            os.makedirs(self.recordings_dir)
+        if not os.path.exists(self.recordings_directory):
+            os.makedirs(self.recordings_directory)
