@@ -99,6 +99,30 @@ class OpenAIClient:
         except Exception as e:
             log(f"Error during command processing: {e}", error=True)
 
+
+    def close_and_clear_files(self):
+        # Close threads
+        with open("active.treg", "r+") as file:
+            threads = file.read().strip().splitlines()
+            for thread_id in threads:
+                try:
+                    openai.beta.threads.delete(thread_id)
+                    log(f"Thread {thread_id} closed.")
+                except Exception as e:
+                    log(f"Error closing thread {thread_id}: {e}", True)
+            file.truncate(0)
+
+        # Close assistants
+        with open("active.areg", "r+") as file:
+            assistants = file.read().strip().splitlines()
+            for assistant_id in assistants:
+                try:
+                    openai.beta.assistants.delete(assistant_id)
+                    log(f"Assistant {assistant_id} closed.")
+                except Exception as e:
+                    log(f"Error closing assistant {assistant_id}: {e}", True)
+            file.truncate(0)
+
     def _record_active_thread(self, thread_id):
         # Append the new thread ID to the active_threads_file
         with open(self.active_threads_file, "a") as file:

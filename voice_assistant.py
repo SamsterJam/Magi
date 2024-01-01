@@ -10,6 +10,7 @@ from openai_client import OpenAIClient
 from wake_word_detector import WakeWordDetector
 from assistant_functions import get_weather
 from utils import log, vlog, vvlog
+import openai_client
 
 
 class VoiceAssistant:
@@ -22,6 +23,14 @@ class VoiceAssistant:
         self.openai_client = OpenAIClient(self.config)
         self.wake_word_detector = WakeWordDetector(self.config)
         self.setup_signal_handling()
+
+        # Close past threads and assistants
+        self.openai_client.close_and_clear_files()
+
+        # Create a thread and an assistant
+        self.thread_id = self.openai_client.create_thread()
+        self.assistant_id = self.openai_client.create_assistant("Your are a helpful Assistant")
+        
     
         self.command_actions = {
                 "stop": self.stop_audio,
@@ -43,10 +52,6 @@ class VoiceAssistant:
         try:
             # Initialize the wake word detector
             self.wake_word_detector.init_porcupine()
-
-            # Create a thread and an assistant
-            self.thread_id = self.openai_client.create_thread()
-            self.assistant_id = self.openai_client.create_assistant("Your are a helpful Assistant")
 
             # Calibrate the recognizer for ambient noise before starting the main loop
             with sr.Microphone() as source:
