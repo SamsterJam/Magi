@@ -26,14 +26,17 @@ from scipy.io import wavfile
 # === Global Options === #
 
 KEY_WORD = "Hey Magi"
-ASSISTANT_ID = "asst_9MSfQ82sD2yiU0iz5pPbcIEA"
 CUSTOM_WAKE_WORD_FILE = "Magi-wake.ppn"
+
 SPEAKING_RATE = 1.15
 VOICE_NAME = "en-US-Polyglot-1"
 PITCH = -5.0
 OUTPUT_AUDIO_FILE = 'output.wav'
-NOISE_CALIBRATION_TIME = 3
+
+NOISE_CALIBRATION_TIME = 2
 COMMAND_AWAIT_TIME_OUT = 10
+
+SYSTEM_PROMPT_FILE = "system.txt"
 RECORDINGS_DIR = 'recordings'
 
 RECOGNIZER_PAUSE_THRESHOLD = 0.5
@@ -211,7 +214,7 @@ def recognize_speech():
     return None
 
 
-def process_command_with_assistant(thread_id, command):
+def process_command_with_assistant(thread_id, command, assistant_id):
     try:
         # Log the command received
         vlog(f"OpenAI: Received command: {command}")
@@ -231,7 +234,7 @@ def process_command_with_assistant(thread_id, command):
         vlog("OpenAI: Running Assistant with Thread...")
         run_response = openai_client.beta.threads.runs.create(
             thread_id=thread_id,
-            assistant_id=ASSISTANT_ID  # Replace with your actual assistant ID
+            assistant_id=assistant_id  # Use the dynamic assistant ID passed to the function
         )
 
         # Log the run ID
@@ -348,6 +351,54 @@ def delete_thread(thread_id):
         traceback.print_exc()
 
 
+def create_assistant():
+    vlog("Creating a new assistant...")
+    try:
+        prompt = "You are an AI assistant. Please help the user with their queries."
+
+        try:
+            with open(SYSTEM_PROMPT_FILE, 'r') as file:
+                prompt = file.read()
+        except FileNotFoundError:
+            log("System-Prompt file not found, using default!", True)
+
+
+        # Define the assistant's instructions, model, and tools here
+        assistant_response = openai_client.beta.assistants.create(
+            name="Magi",
+            instructions=prompt,
+            tools=[{"type": "code_interpreter"}],  # Add other tools/functions as needed
+            model="gpt-3.5-turbo-1106"  # Replace with the desired model
+        )
+        assistant_id = assistant_response.id
+        vlog(f"Assistant created with ID: {assistant_id}")
+        # Append the new assistant ID to the active.areg file
+        with open("active.areg", "a") as file:
+            file.write(assistant_id + "\n")
+        return assistant_id
+    except Exception as e:
+        log(f"Failed to create assistant: {e}", True)
+        traceback.print_exc()
+
+
+def delete_assistant(assistant_id):
+    vlog(f"Deleting assistant with ID: {assistant_id}...")
+    try:
+        openai_client.beta.assistants.delete(assistant_id)
+        log(f"Assistant with ID: {assistant_id} deleted successfully.")
+        # Remove the deleted assistant ID from the active.areg file
+        with open("active.areg", "r") as file:
+            assistant_ids = file.read().splitlines()
+        if assistant_id in assistant_ids:
+            assistant_ids.remove(assistant_id)
+        with open("active.areg", "w") as file:
+            file.write("\n".join(assistant_ids) + "\n")
+    except Exception as e:
+        log(f"Failed to delete assistant: {e}", True)
+        traceback.print_exc()
+
+
+
 def signal_handler(sig, frame):
     global shutdown_flag, wake_word_thread
     log("Shutdown initiated by signal...")
@@ -357,7 +408,7 @@ def signal_handler(sig, frame):
     if wake_word_thread and wake_word_thread.is_alive():
         wake_word_thread.join()  # Ensure the wake word thread is joined
 
-def closePastConversationThreads():
+def close_past_conversation_threads():
     vlog("Checking for unclosed conversation threads...")
     thread_ids = []
     try:
@@ -372,6 +423,27 @@ def closePastConversationThreads():
         for thread_id in thread_ids:
             if thread_id:  # Ensure the thread ID is not empty
                 delete_thread(thread_id)
+
+
+def close_past_assistants():
+    vlog("Checking for unclosed assistants...")
+    assistant_ids = []
+    try:
+        with open("active.areg", "r") as file:
+            assistant_ids = file.read().splitlines()
+    except FileNotFoundError:
+        # If the file does not exist, create it
+        with open("active.areg", "w") as file:
+            pass
+
+    if assistant_ids:
+        for assistant_id in assistant_ids:
+            if assistant_id:  # Ensure the assistant ID is not empty
+                delete_assistant(assistant_id)
+
+
+
+
 
 
 
@@ -440,7 +512,7 @@ def main():
                     command_actions[command.lower()]()  # Execute the corresponding function
                 else:
                     play_feedback_sound('Sounds/Heard.wav')
-                    response = process_command_with_assistant(thread_id, command)
+                    response = process_command_with_assistant(thread_id, command, assistant_id)
                     if response:  # Only synthesize and play speech if there's a response
                         audio_content = synthesize_speech(response)
                         play_speech(audio_content)
@@ -465,11 +537,23 @@ if __name__ == "__main__":
         # Register the signal handler for SIGINT
         signal.signal(signal.SIGINT, signal_handler)
 
-        
-        closePastConversationThreads()
+        # Close any past conversation threads that were not properly closed
+        close_past_conversation_threads()
 
+        # Close any past assistants that were not properly closed
+        close_past_assistants()
+
+        # Create a new assistant
+        assistant_id = create_assistant()
+
+        # Calibrate for ambient noise
         calibrate_for_ambient_noise()
+
+        # Start the main function
         main()
+
+        # Delete the assistant when done
+        delete_assistant(assistant_id)
     except Exception as e:
         log(f"Unhandled exception in main: {e}", True)
         traceback.print_exc()
