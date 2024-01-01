@@ -18,6 +18,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 import pvporcupine
 from scipy.io import wavfile
+import json
+import requests
 
 
 
@@ -250,6 +252,26 @@ def process_command_with_assistant(thread_id, command, assistant_id):
             if run_status.status == 'completed':
                 vlog("OpenAI: Created Response!")
                 break
+            elif run_status.status == 'requires_action':
+                # Handle the function call
+                for tool_call in run_status.required_action.submit_tool_outputs.tool_calls:
+                    if tool_call.function.name == "get_weather":
+                        # Parse the JSON string into a Python object
+                        arguments = json.loads(tool_call.function.arguments)
+                        # Now you can access the location attribute
+                        weather_info = get_weather(arguments["location"])
+                        # Submit the result back to the assistant
+                        openai_client.beta.threads.runs.submit_tool_outputs(
+                            thread_id=thread_id,
+                            run_id=run_response.id,
+                            tool_outputs=[
+                                {
+                                    "tool_call_id": tool_call.id,
+                                    "output": weather_info
+                                }
+                            ]
+                        )
+                continue
             time.sleep(1)  # Polling interval
 
         # Retrieve the assistant's messages
@@ -367,7 +389,23 @@ def create_assistant():
         assistant_response = openai_client.beta.assistants.create(
             name="Magi",
             instructions=prompt,
-            tools=[{"type": "code_interpreter"}],  # Add other tools/functions as needed
+            tools=[
+                {"type": "code_interpreter"},  # Add other tools/functions as needed
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "Get the current weather for a location",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "location": {"type": "string", "description": "The city to get the weather for"}
+                            },
+                            "required": ["location"]
+                        }
+                    }
+                }
+            ],
             model="gpt-3.5-turbo-1106"  # Replace with the desired model
         )
         assistant_id = assistant_response.id
@@ -475,6 +513,41 @@ command_actions = {
     "shutdown": shutdown,
     "shut down": shutdown,
 }
+
+
+
+
+
+
+
+# === Assistant Tool Functions === #
+
+def get_weather(location):
+
+    api_key = os.getenv("OPENWEATHERMAP_API_KEY")
+
+    # Construct the API endpoint with the location and your API key
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={location}&appid={api_key}&units=imperial"
+    
+    try:
+        # Make the API request
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an HTTPError if the HTTP request returned an unsuccessful status code
+        
+       # Parse the JSON response
+        weather_data = response.json()
+        
+        # Convert the JSON object to a string
+        weather_data_string = json.dumps(weather_data)
+        
+        return weather_data_string
+    
+    except requests.RequestException as e:
+        # Handle any errors that occur during the API request
+        error_message = f"Failed to get weather data for {location}: {e}"
+        print(error_message)
+        return error_message
+
 
 
 
