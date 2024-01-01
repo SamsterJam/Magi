@@ -1,6 +1,7 @@
 import threading
 import signal
 import speech_recognition as sr
+import time
 from config import Config
 from audio_manager import AudioManager
 from speech_recognizer import SpeechRecognizer
@@ -45,8 +46,7 @@ class VoiceAssistant:
 
             log("Voice Assistant is running. Say the wake word to activate.")
             while not self.shutdown_flag:
-                # Main loop logic placeholder
-                pass
+                time.sleep(1)
         finally:
             self.cleanup()
 
