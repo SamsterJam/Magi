@@ -10,6 +10,7 @@ import argparse
 import numpy as np
 import sounddevice as sd
 from queue import Queue
+import threading
 from threading import Thread
 from colorama import Fore, Style, init
 import speech_recognition as sr
@@ -128,19 +129,62 @@ vlog("Initialization Complete!")
 
 
 
+
+
+
+# === Audio Manager === #
+
+class AudioManager:
+    def __init__(self):
+        self.playback_queue = Queue()
+        self.playback_thread = threading.Thread(target=self._playback_worker, daemon=True)
+        self.playback_thread.start()
+        self.playback_event = threading.Event()
+
+    def _playback_worker(self):
+        while True:
+            sound_file, wait_full_sound = self.playback_queue.get()
+            if sound_file is None:
+                break  # Stop the thread if None is enqueued
+            try:
+                fs, data = wavfile.read(sound_file)
+                sd.play(data, fs)
+                if wait_full_sound:
+                    sd.wait()
+            except Exception as e:
+                print(f"Error playing sound: {e}")
+            finally:
+                self.playback_queue.task_done()
+                self.playback_event.set()  # Signal that playback is done
+
+    def play_sound(self, sound_file, wait_full_sound=False):
+        self.playback_event.clear()  # Reset the event
+        self.playback_queue.put((sound_file, wait_full_sound))
+        if wait_full_sound:
+            self.playback_event.wait()  # Wait for the sound to finish playing
+
+    def stop_all_sounds(self):
+        sd.stop()
+
+    def shutdown(self):
+        self.playback_queue.put((None, False))  # Enqueue None to stop the thread
+        self.playback_thread.join()
+
+
+audio_manager = AudioManager()
+
+
+def play_feedback_sound(sound_file, wait_full_sound=False):
+    audio_manager.play_sound(sound_file, wait_full_sound)
+
+
+
+
+
+
+
+
 # === Function Definitions === #
-
-def play_feedback_sound(sound_file, waitFullSound=False):
-    try:
-        # Read the audio file
-        fs, data = wavfile.read(sound_file)
-        # Play the audio file
-        sd.play(data, fs, latency=0.1)
-        if waitFullSound:
-            sd.wait()
-    except Exception as e:
-        log(f"Error playing feedback sound: {e}", True)
-
 
 def calibrate_for_ambient_noise():
     global ambient_noise_energy_threshold
@@ -231,7 +275,8 @@ def process_command_with_assistant(thread_id, command, assistant_id):
 
         # Log the message ID
         vlog(f"Message created with ID: {message.id}")
-
+        
+        play_feedback_sound("Sounds/Request.wav")
         # Run the assistant on the thread
         vlog("OpenAI: Running Assistant with Thread...")
         run_response = openai_client.beta.threads.runs.create(
@@ -280,6 +325,7 @@ def process_command_with_assistant(thread_id, command, assistant_id):
             thread_id=thread_id
         )
         vlog("OpenAI: Retrieved Response!")
+        play_feedback_sound("Sounds/Received.wav")
 
         # Extract the text content from the assistant's last message
         assistant_messages = [msg for msg in messages.data if msg.role == 'assistant']
@@ -438,13 +484,14 @@ def delete_assistant(assistant_id):
 
 
 def signal_handler(sig, frame):
-    global shutdown_flag, wake_word_thread
+    global shutdown_flag, wake_word_thread, audio_manager
     log("Shutdown initiated by signal...")
     shutdown_flag = True
     if porcupine is not None:
         porcupine.delete()  # Stop Porcupine if it's running
     if wake_word_thread and wake_word_thread.is_alive():
         wake_word_thread.join()  # Ensure the wake word thread is joined
+    audio_manager.shutdown()  # Shutdown the audio manager
 
 def close_past_conversation_threads():
     vlog("Checking for unclosed conversation threads...")
@@ -489,7 +536,7 @@ def close_past_assistants():
 # === Command Actions === #
 
 def stop_audio():
-    sd.stop()
+    audio_manager.stop_all_sounds()
     play_feedback_sound('Sounds/Cancel.wav')
     log("Audio stopped.")
 
@@ -584,7 +631,7 @@ def main():
                 if command.lower() in command_actions:
                     command_actions[command.lower()]()  # Execute the corresponding function
                 else:
-                    play_feedback_sound('Sounds/Heard.wav')
+                    play_feedback_sound('Sounds/Heard.wav', True)
                     response = process_command_with_assistant(thread_id, command, assistant_id)
                     if response:  # Only synthesize and play speech if there's a response
                         audio_content = synthesize_speech(response)
