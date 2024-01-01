@@ -4,3 +4,5 @@ recordings/
 deleteThreads.py
 Threads/
 output.wav
+__pycache__/
+
