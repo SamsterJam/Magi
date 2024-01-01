@@ -1,4 +1,6 @@
 import speech_recognition as sr
+import datetime
+import os
 from utils import log, vlog, vvlog
 
 class SpeechRecognizer:
@@ -14,15 +16,23 @@ class SpeechRecognizer:
         log(f"Calibrating for ambient noise ({self.config.noise_calibration_time}s)...")
         self.recognizer.adjust_for_ambient_noise(source, duration=self.config.noise_calibration_time)
         self.ambient_noise_energy_threshold = self.recognizer.energy_threshold
-        log(f"Calibrated energy threshold: {self.ambient_noise_energy_threshold}")
+        vlog(f"Calibrated energy threshold: {self.ambient_noise_energy_threshold}")
 
     def recognize_speech(self, source, timeout):
-        log("Please speak your command...")
-        self.recognizer.energy_threshold = self.ambient_noise_energy_threshold
         try:
             audio = self.recognizer.listen(source, timeout=timeout)
+            log("Listening, please speak your command...")
+
             text = self.recognizer.recognize_google(audio)
             log("Processed Audio: " + text)
+
+            # Save the audio data to a file in the 'recordings' directory
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            audio_filename = os.path.join(self.config.recordings_directory, f"audio_{timestamp}.wav")
+            with open(audio_filename, "wb") as audio_file:
+                audio_file.write(audio.get_wav_data())
+            vlog(f"Audio saved to {audio_filename}")
+
             return text
         except sr.WaitTimeoutError:
             log("No speech was detected within the timeout period.", error=True)

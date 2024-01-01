@@ -22,9 +22,9 @@ class Config:
         self.output_audio_file = 'output.wav'
 
         # Recognition configurations
-        self.noise_calibration_time = 2
-        self.command_await_timeout = 10
-        self.recognizer_pause_threshold = 0.5
+        self.noise_calibration_time = 3
+        self.command_await_timeout = 5
+        self.recognizer_pause_threshold = 0.3
         self.recognizer_phrase_threshold = 0.3
         self.recognizer_non_speaking_duration = 0.2
 
@@ -35,7 +35,6 @@ class Config:
         # Directories
         self.recordings_directory = 'recordings'
         self.outputs_directory = 'outputs'
-        self.system_prompt_file = "system.txt"
 
         # Ensure necessary directories exist
         if not os.path.exists(self.recordings_directory):

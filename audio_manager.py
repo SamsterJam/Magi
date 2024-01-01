@@ -29,6 +29,7 @@ class AudioManager:
                 self.playback_event.set()  # Signal that playback is done
 
     def play_sound(self, sound_file, wait_full_sound=False):
+        vvlog(f"Playing sound: {sound_file}...")
         self.playback_event.clear()  # Reset the event
         self.playback_queue.put((sound_file, wait_full_sound))
         if wait_full_sound:

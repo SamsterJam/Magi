@@ -6,6 +6,7 @@ from assistant_functions import get_weather
 
 class OpenAIClient:
     def __init__(self, config):
+        self.config = config
         self.api_key = config.openai_api_key
         self.openai_client = openai.OpenAI(api_key=self.api_key)
         self.active_threads_file = "active.treg"
@@ -24,7 +25,7 @@ class OpenAIClient:
     def delete_thread(self, thread_id):
         try:
             self.openai_client.beta.threads.delete(thread_id)
-            log(f"Thread with ID: {thread_id} deleted successfully.")
+            vlog(f"Thread with ID: {thread_id} deleted successfully.")
             self._remove_active_thread(thread_id)
         except Exception as e:
             log(f"Failed to delete thread: {e}", error=True)
@@ -34,7 +35,23 @@ class OpenAIClient:
             assistant_response = self.openai_client.beta.assistants.create(
                 name="Magi",
                 instructions=prompt,
-                tools=[{"type": "code_interpreter"}],  # Add other tools/functions as needed
+                tools=[
+                    {"type": "code_interpreter"},  # Add other tools/functions as needed
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "description": "Get the current weather for a location",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "location": {"type": "string", "description": "The city to get the weather for"}
+                                },
+                                "required": ["location"]
+                            }
+                        }
+                    }
+                ],
                 model="gpt-3.5-turbo-1106"  # Replace with the desired model
             )
             assistant_id = assistant_response.id
@@ -47,7 +64,7 @@ class OpenAIClient:
     def delete_assistant(self, assistant_id):
         try:
             self.openai_client.beta.assistants.delete(assistant_id)
-            log(f"Assistant with ID: {assistant_id} deleted successfully.")
+            vlog(f"Assistant with ID: {assistant_id} deleted successfully.")
             self._remove_active_assistant(assistant_id)
         except Exception as e:
             log(f"Failed to delete assistant: {e}", error=True)
@@ -78,6 +95,7 @@ class OpenAIClient:
                 if run_status.status == 'completed':
                     break
                 elif run_status.status == 'requires_action':
+                    vlog("Assistant is requiring action...")
                     # Handle required actions, such as calling external functions
                     self._handle_required_actions(run_status, thread_id, run_response.id)
                 # Polling interval
@@ -88,16 +106,23 @@ class OpenAIClient:
                 thread_id=thread_id
             )
             assistant_messages = [msg for msg in messages.data if msg.role == 'assistant']
+            # Sort the messages by the 'created_at' timestamp
             assistant_messages.sort(key=lambda msg: msg.created_at)
             if assistant_messages:
-                assistant_reply = assistant_messages[-1].content
+                # Get the last message from the assistant
+                vvlog(assistant_messages)
+                assistant_reply_content = assistant_messages[-1].content
+                if isinstance(assistant_reply_content, list) and assistant_reply_content:
+                    assistant_reply = assistant_reply_content[-1].text.value  # Get the last text value
+                else:
+                    assistant_reply = "I'm sorry, I can't process your request right now."
             else:
                 assistant_reply = "I'm sorry, I can't process your request right now."
 
             log(f"Assistant Response: {assistant_reply}")
             return assistant_reply
         except Exception as e:
-            log(f"Error during command processing: {e}", error=True)
+            log(f"Error during command processing: {e}", True)
 
 
     def close_and_clear_files(self):
@@ -152,6 +177,7 @@ class OpenAIClient:
     def _handle_required_actions(self, run_status, thread_id, run_id):
         # Handle required actions from the assistant, such as calling external functions
         for tool_call in run_status.required_action.submit_tool_outputs.tool_calls:
+            vlog(f"Assistant called {tool_call.function.name}()")
             if tool_call.function.name == "get_weather":
                 arguments = json.loads(tool_call.function.arguments)
                 weather_info = get_weather(self.config.openweathermap_api_key, arguments["location"])

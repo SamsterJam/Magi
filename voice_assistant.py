@@ -15,6 +15,7 @@ import openai_client
 
 class VoiceAssistant:
     def __init__(self):
+        vvlog("Initializing Voice Assistant...")
         self.shutdown_flag = False
         self.config = Config()
         self.audio_manager = AudioManager()
@@ -25,12 +26,19 @@ class VoiceAssistant:
         self.setup_signal_handling()
 
         # Close past threads and assistants
+        vlog("Closing past threads and assistants...")
         self.openai_client.close_and_clear_files()
 
         # Create a thread and an assistant
+        vlog("Creating new thread...")
         self.thread_id = self.openai_client.create_thread()
-        self.assistant_id = self.openai_client.create_assistant("Your are a helpful Assistant")
+
+        with open("system-prompt.txt", 'r') as file:
+            prompt = file.read()
+            vvlog(f"Creating Assistant with prompt from 'system-prompt.txt'")
         
+        vlog("Creating new assistant...")
+        self.assistant_id = self.openai_client.create_assistant(prompt)
     
         self.command_actions = {
                 "stop": self.stop_audio,
@@ -51,6 +59,7 @@ class VoiceAssistant:
     def run(self):
         try:
             # Initialize the wake word detector
+            vvlog("Initializing Porcupine...")
             self.wake_word_detector.init_porcupine()
 
             # Calibrate the recognizer for ambient noise before starting the main loop
@@ -60,6 +69,7 @@ class VoiceAssistant:
             # Start the wake word detector in a separate thread
             self.wake_word_thread = threading.Thread(target=self.wake_word_detector.listen_for_wake_word, args=(self.wake_word_detected,))
             self.wake_word_thread.start()
+            vvlog("Wake-Word thread started!")
 
             log("Voice Assistant is running. Say the wake word to activate.")
             while not self.shutdown_flag:
@@ -68,21 +78,23 @@ class VoiceAssistant:
             self.cleanup()
 
     def wake_word_detected(self):
-        log("Wake word detected.")
         # Play a sound to acknowledge wake word detection
         self.audio_manager.play_sound('Sounds/Wake.wav')
+
         # Capture and process the command
         self.process_command()
 
     def process_command(self):
         with sr.Microphone() as source:
             command = self.speech_recognizer.recognize_speech(source, self.config.command_await_timeout)
+            self.audio_manager.play_sound('Sounds/Heard.wav')
             if command:
                 self.handle_command(command)
 
     def handle_command(self, command):
         # Check for local commands such as "shutdown"
         if command.lower() in self.command_actions:
+            vlog("Command issued is local command, executing corresponding function...")
             self.command_actions[command.lower()]()  # Execute the corresponding function
         else:
             # Process command with OpenAI or other functionalities

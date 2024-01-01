@@ -35,7 +35,7 @@ class TextToSpeech:
             file_path = os.path.join(self.config.outputs_directory, filename)
             with open(file_path, "wb") as out:
                 out.write(response.audio_content)
-                log(f"Audio content saved to {file_path}")
+                vlog(f"Audio content saved to {file_path}")
 
             return file_path
         except Exception as e:

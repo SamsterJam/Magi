@@ -14,9 +14,9 @@ def main():
     args = parse_arguments()
     verbosity = 0
     if args.very_verbose:
-        verbosity = 1
-    elif args.verbose:
         verbosity = 2
+    elif args.verbose:
+        verbosity = 1
 
     set_verbosity(verbosity)
 

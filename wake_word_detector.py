@@ -39,7 +39,7 @@ class WakeWordDetector:
                             samplerate=self.porcupine.sample_rate,
                             channels=1):
             log(f"Listening for keyword '{self.config.key_word}'...")
-            while True:  # Use the shutdown_flag from the config
+            while True:
                 time.sleep(0.1)
 
     def shutdown(self):
