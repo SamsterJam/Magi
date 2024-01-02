@@ -87,20 +87,26 @@ class VoiceAssistant:
     def process_command(self):
         with sr.Microphone() as source:
             command = self.speech_recognizer.recognize_speech(source, self.config.command_await_timeout)
-            self.audio_manager.play_sound('Sounds/Heard.wav')
             if command:
+                self.audio_manager.play_sound('Sounds/Heard.wav')
                 self.handle_command(command)
+            else:
+                self.audio_manager.play_sound('Sounds/NoSpeech.wav')
 
     def handle_command(self, command):
         # Check for local commands such as "shutdown"
         if command.lower() in self.command_actions:
             vlog("Command issued is local command, executing corresponding function...")
+            self.audio_manager.play_sound('Sounds/LocalCommand.wav')
             self.command_actions[command.lower()]()  # Execute the corresponding function
         else:
+            self.audio_manager.play_sound('Sounds/Heard.wav', True)
             # Process command with OpenAI or other functionalities
             # Use the thread_id and assistant_id when calling process_command_with_assistant
+            self.audio_manager.play_sound('Sounds/Request.wav')
             response = self.openai_client.process_command_with_assistant(self.thread_id, command, self.assistant_id)
             if response:
+                self.audio_manager.play_sound('Sounds/Received.wav')
                 # Assuming response is a list of MessageContentText objects, extract the text value
                 if isinstance(response, list) and response and hasattr(response[0], 'text'):
                     text_response = response[0].text.value

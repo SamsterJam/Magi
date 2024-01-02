@@ -19,9 +19,10 @@ class SpeechRecognizer:
         vlog(f"Calibrated energy threshold: {self.ambient_noise_energy_threshold}")
 
     def recognize_speech(self, source, timeout):
+        log("Listening, speak your command...")
         try:
             audio = self.recognizer.listen(source, timeout=timeout)
-            log("Listening, please speak your command...")
+            vvlog("Picking up audio...")
 
             text = self.recognizer.recognize_google(audio)
             log("Processed Audio: " + text)
