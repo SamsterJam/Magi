@@ -79,7 +79,7 @@ class VoiceAssistant:
 
     def wake_word_detected(self):
         # Play a sound to acknowledge wake word detection
-        self.audio_manager.play_sound('Sounds/Wake.wav')
+        self.audio_manager.play_sound('sounds/Wake.wav')
 
         # Capture and process the command
         self.process_command()
@@ -88,25 +88,25 @@ class VoiceAssistant:
         with sr.Microphone() as source:
             command = self.speech_recognizer.recognize_speech(source, self.config.command_await_timeout)
             if command:
-                self.audio_manager.play_sound('Sounds/Heard.wav')
+                self.audio_manager.play_sound('sounds/Heard.wav')
                 self.handle_command(command)
             else:
-                self.audio_manager.play_sound('Sounds/NoSpeech.wav')
+                self.audio_manager.play_sound('sounds/NoSpeech.wav')
 
     def handle_command(self, command):
         # Check for local commands such as "shutdown"
         if command.lower() in self.command_actions:
             vlog("Command issued is local command, executing corresponding function...")
-            self.audio_manager.play_sound('Sounds/LocalCommand.wav')
+            self.audio_manager.play_sound('sounds/LocalCommand.wav')
             self.command_actions[command.lower()]()  # Execute the corresponding function
         else:
-            self.audio_manager.play_sound('Sounds/Heard.wav', True)
+            self.audio_manager.play_sound('sounds/Heard.wav', True)
             # Process command with OpenAI or other functionalities
             # Use the thread_id and assistant_id when calling process_command_with_assistant
-            self.audio_manager.play_sound('Sounds/Request.wav')
+            self.audio_manager.play_sound('sounds/Request.wav')
             response = self.openai_client.process_command_with_assistant(self.thread_id, command, self.assistant_id)
             if response:
-                self.audio_manager.play_sound('Sounds/Received.wav')
+                self.audio_manager.play_sound('sounds/Received.wav')
                 # Assuming response is a list of MessageContentText objects, extract the text value
                 if isinstance(response, list) and response and hasattr(response[0], 'text'):
                     text_response = response[0].text.value
@@ -131,7 +131,7 @@ class VoiceAssistant:
         log("Shutdown initiated...")
         self.shutdown_flag = True
         # Play a sound to acknowledge shutdown command
-        self.audio_manager.play_sound('Sounds/Shutdown.wav', wait_full_sound=True)
+        self.audio_manager.play_sound('sounds/Shutdown.wav', wait_full_sound=True)
 
     def cleanup(self):
         log("Cleaning up resources...")

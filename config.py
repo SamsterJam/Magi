@@ -30,7 +30,7 @@ class Config:
 
         # Wake word configurations
         self.key_word = "Hey Magi"
-        self.custom_wake_word_file = "Magi-wake.ppn"
+        self.custom_wake_word_file = "wake-word.ppn"
 
         # Directories
         self.recordings_directory = 'recordings'
